@@ -287,6 +287,15 @@ class TestFilter(unittest.TestCase):
         cls.measurements()
         cls.noise()
 
+        # long equations
+        cls.err_p_C_dot = cls._derive_err_pc_dot()
+        cls.f_err_p_C_dot = casadi.Function('f_err_p_C_dot',
+                [cls.dt, *cls.err_x, *cls.u, *cls.n, cls.R_WB],
+                [cls.err_p_C_dot],
+                ['dt', *cls.err_x_str, *cls.u_str,
+                    *cls.n_str, 'R_WB'],
+                ['err_p_C_dot'])
+
     @classmethod
     def states(cls):
         cls.p_B = casadi.SX.sym('p_B', 3)
@@ -315,6 +324,7 @@ class TestFilter(unittest.TestCase):
 
         cls.err_x = [cls.err_p_B, cls.err_v_B, cls.err_theta,
                     cls.err_dofs_t, cls.err_dofs_r, cls.err_p_C, cls.err_theta_C]
+        cls.err_x_cas = casadi.vertcat(*cls.err_x)
         cls.err_x_str = ['err_p_B', 'err_v_B', 'err_theta',
                     'err_dofs_t', 'err_dofs_r', 'err_p_C', 'err_theta_C']
 
@@ -341,7 +351,48 @@ class TestFilter(unittest.TestCase):
         cls.n_dofs_r = casadi.SX.sym('n_dofs_r', 3)
 
         cls.n = [cls.n_v, cls.n_om, cls.n_dofs_t, cls.n_dofs_r]
+        cls.n_cas = casadi.vertcat(*cls.n)
         cls.n_str = ['n_v', 'n_om', 'n_dofs_t', 'n_dofs_r']
+
+    @classmethod
+    def _derive_err_pc_dot(cls):
+        """
+            Example derivation of err_p_B:
+
+            [In continuous time]
+            p_B_tr_dot = p_B_dot + err_p_B_dot
+            v_B_tr = v_B + err_v_B
+
+            err_p_B_dot = v_B_tr - v_B
+                        = v_B + err_v_B - v_B
+                        = err_v_B
+
+            [Discretised]
+            err_p_B_next = err_p_B + dt * err_v_B
+        """
+
+        # deriving err_p_C_dot -- define the true values
+        v_B_tr = cls.v_B + cls.err_v_B
+        R_WB_tr = cls.R_WB @ (casadi.DM.eye(3) \
+                    + casadi.skew(cls.err_theta))
+        dofs_t_tr = cls.dofs_t + cls.err_dofs_t
+        dofs_r_tr = cls.dofs_r + cls.err_dofs_r # this is a placeholder ## TODO
+        dofs_tr = casadi.vertcat(dofs_t_tr, dofs_r_tr)
+        om_tr = cls.om - cls.n_om
+
+        # deriving err_p_C_dot -- continuous time
+        p_CB_dot = cls.R_WB @ cls.v_CB \
+                + casadi.skew(cls.om) @ cls.R_WB @ cls.p_CB
+        p_CB_dot_tr = R_WB_tr @ cls.v_CB \
+                + casadi.skew(om_tr) @ R_WB_tr @ cls.p_CB
+
+        p_C_dot = cls.v_B + p_CB_dot
+        p_C_dot_tr = v_B_tr + p_CB_dot_tr
+
+        # err_p_C_dot = p_C_dot_tr - p_C_dot # results in free variables v_B
+        err_p_C_dot = cls.err_v_B + p_CB_dot_tr - p_CB_dot
+
+        return err_p_C_dot
 
     def test_fun_nominal(self):
         p_B_next = self.p_B \
@@ -375,47 +426,59 @@ class TestFilter(unittest.TestCase):
                          )
         p_B_next = res['p_B_next']
 
-    def _derive_err_pc_dot(self):
-        """
-            Example derivation of err_p_B:
+    def _gen_trmatr_err_p_C_dot(self):
+        jac_err_p_C_dot = self.f_err_p_C_dot.jac()
+        res = jac_err_p_C_dot(  dt   = self.dt,
+                                om   = self.om,
+                                acc  = self.acc,
+                                R_WB = self.R_WB)
 
-            [In continuous time]
-            p_B_tr_dot = p_B_dot + err_p_B_dot
-            v_B_tr = v_B + err_v_B
+        # jacobian of err_p_cam w.r.t. err_x
+        l_in = 0
+        r_in = 0
 
-            err_p_B_dot = v_B_tr - v_B
-                        = v_B + err_v_B - v_B
-                        = err_v_B
+        trmatr_err_p_C_dot = np.zeros((self.err_p_C_dot.shape[0],
+                            self.err_x_cas.shape[0]))
 
-            [Discretised]
-            err_p_B_next = err_p_B + dt * err_v_B
-        """
+        for x in self.err_x_str:
+            name = 'Derr_p_C_dotD' + x
+            res_np = casadi.DM(res[name]).full()
 
-        # deriving err_p_C_dot -- define the true values
-        v_B_tr = self.v_B + self.err_v_B
-        R_WB_tr = self.R_WB @ (casadi.DM.eye(3) \
-                    + casadi.skew(self.err_theta))
-        dofs_t_tr = self.dofs_t + self.err_dofs_t
-        dofs_r_tr = self.dofs_r + self.err_dofs_r # this is a placeholder ## TODO
-        dofs_tr = casadi.vertcat(dofs_t_tr, dofs_r_tr)
-        om_tr = self.om - self.n_om
+            r_in += res_np.shape[1]
+            trmatr_err_p_C_dot[0:3,l_in:r_in] = res_np
+            l_in = r_in
 
-        # deriving err_p_C_dot -- continuous time
-        p_CB_dot = self.R_WB @ self.v_CB \
-                + casadi.skew(self.om) @ self.R_WB @ self.p_CB
-        p_CB_dot_tr = R_WB_tr @ self.v_CB \
-                + casadi.skew(om_tr) @ R_WB_tr @ self.p_CB
+        return trmatr_err_p_C_dot
 
-        p_C_dot = self.v_B + p_CB_dot
-        p_C_dot_tr = v_B_tr + p_CB_dot_tr
+    def _gen_nmatr_err_p_C_dot(self):
+        jac_err_p_C_dot = self.f_err_p_C_dot.jac()
+        res = jac_err_p_C_dot(  dt   = self.dt,
+                                om   = self.om,
+                                acc  = self.acc,
+                                R_WB = self.R_WB)
 
-        # err_p_C_dot = p_C_dot_tr - p_C_dot # results in free variables v_B
-        err_p_C_dot = self.err_v_B + p_CB_dot_tr - p_CB_dot
+        # jacobian of err_p_cam w.r.t. n
+        l_in = 0
+        r_in = 0
 
-        return err_p_C_dot
+        nmatr_err_p_C_dot = np.zeros((self.err_p_C_dot.shape[0],
+                self.n_cas.shape[0]))
+
+        for n in self.n_str:
+            name = 'Derr_p_C_dotD' + n
+            res_np = casadi.DM(res[name]).full()
+
+            r_in += res_np.shape[1]
+            nmatr_err_p_C_dot[0:3,l_in:r_in] = res_np
+            l_in = r_in
+
+        return nmatr_err_p_C_dot
 
     def test_fun_error(self):
-        err_p_C_dot = self._derive_err_pc_dot()
+        trmatr_err_p_C_dot = self._gen_trmatr_err_p_C_dot()
+
+        err_p_C_next = self.err_p_C \
+                + self.dt @ trmatr_err_p_C_dot @ self.err_x_cas
 
         fun_error = casadi.Function('f_err',
             [self.dt, *self.err_x, *self.u, *self.n, self.R_WB],
@@ -424,7 +487,7 @@ class TestFilter(unittest.TestCase):
                 -casadi.cross(self.om, self.err_theta) + self.n_om,
                 self.n_dofs_t,
                 self.n_dofs_r,
-                self.err_p_C + self.dt * err_p_C_dot ],
+                err_p_C_next ],
             ['dt', *self.err_x_str, *self.u_str,
                 *self.n_str, 'R_WB'],
             ['err_p_B_next', 'err_v_B_next', 'err_theta_next',
@@ -439,26 +502,6 @@ class TestFilter(unittest.TestCase):
                         acc = casadi.DM(self.imu.acc),
                          )
         err_p_B_next = res['err_p_B_next']
-
-        index_x = [fun_error.index_in(x) for x in self.err_x_str]
-        index_n = [fun_error.index_in(n) for n in self.n_str]
-        index_err_p_C = fun_error.index_out('err_p_C_next')
-
-        jac_pc_x = []
-        for idx in index_x:
-            name = 'jac_pc_' + self.err_x_str[idx - index_x[0]]
-
-            jac = fun_error.jacobian_old(idx, index_err_p_C)
-            jac = jac.slice(name, range(0,jac.n_in()), [0])
-            jac_pc_x.append(jac)
-
-        jac_pc_n = []
-        for idn in index_n:
-            name = 'jac_pc_' + self.n_str[idn - index_n[0]]
-
-            jac = fun_error.jacobian_old(idn, index_err_p_C)
-            jac = jac.slice(name, range(0,jac.n_in()), [0])
-            jac_pc_n.append(jac)
 
 def suite():
     suite = unittest.TestSuite()
