@@ -283,8 +283,8 @@ class TestFilter(unittest.TestCase):
 
         cls.states()
         cls.error_states()
-        cls.measurements()
         cls.inputs()
+        cls.measurements()
         cls.noise()
 
     @classmethod
@@ -298,9 +298,10 @@ class TestFilter(unittest.TestCase):
         cls.dofs_t, cls.dofs_r, _ = casadi.vertsplit(cls.dofs, [0, 3, 6, 8])
 
         cls.p_C = casadi.SX.sym('p_C', 6)
+        cls.R_WC = casadi.SX.sym('p_C', 3, 3)
 
-        cls.x = [cls.p_B, cls.v_B, cls.R_WB, cls.dofs_t, cls.dofs_r, cls.p_C]
-        cls.x_str = ['p_B', 'v_B', 'R_WB', 'dofs_t', 'dofs_r', 'p_C']
+        cls.x = [cls.p_B, cls.v_B, cls.R_WB, cls.dofs_t, cls.dofs_r, cls.p_C, cls.R_WC]
+        cls.x_str = ['p_B', 'v_B', 'R_WB', 'dofs_t', 'dofs_r', 'p_C', 'R_WC']
 
     @classmethod
     def error_states(cls):
@@ -310,11 +311,12 @@ class TestFilter(unittest.TestCase):
         cls.err_dofs_t = casadi.SX.sym('err_dofs_t', 3)
         cls.err_dofs_r = casadi.SX.sym('err_dofs_r', 3)
         cls.err_p_C = casadi.SX.sym('err_p_C', 3)
+        cls.err_theta_C = casadi.SX.sym('err_theta_C', 3)
 
         cls.err_x = [cls.err_p_B, cls.err_v_B, cls.err_theta,
-                    cls.err_dofs_t, cls.err_dofs_r, cls.err_p_C]
+                    cls.err_dofs_t, cls.err_dofs_r, cls.err_p_C, cls.err_theta_C]
         cls.err_x_str = ['err_p_B', 'err_v_B', 'err_theta',
-                    'err_dofs_t', 'err_dofs_r', 'err_p_C']
+                    'err_dofs_t', 'err_dofs_r', 'err_p_C', 'err_theta_C']
 
     @classmethod
     def measurements(cls):
@@ -345,6 +347,7 @@ class TestFilter(unittest.TestCase):
         p_B_next = self.p_B \
                 + self.dt * self.v_B \
                 + self.dt**2 / 2 * self.R_WB @ self.acc
+        om_C = self.R_BC.T @ self.om + self.R_BC.T @ self.om_CB
 
         fun_nominal = casadi.Function('f_nom',
             [self.dt, *self.x, *self.u, *self.notch_dof],
@@ -353,10 +356,11 @@ class TestFilter(unittest.TestCase):
                 self.R_WB + self.R_WB @ casadi.skew(self.dt * self.om),
                 self.dofs_t,
                 self.dofs_r,
-                p_B_next + self.R_WB @ self.p_CB ],
+                p_B_next + self.R_WB @ self.p_CB,
+                self.R_WC + self.R_WC @ casadi.skew(self.dt * om_C)],
             ['dt', *self.x_str, *self.u_str, *self.notch_dof_str],
             ['p_B_next', 'v_B_next', 'R_WB_next',
-                'dofs_t_next', 'dofs_r_next', 'p_C_next'])
+                'dofs_t_next', 'dofs_r_next', 'p_C_next', 'R_WC_next'])
 
         res = fun_nominal(  dt  = 0.1,
                             p_B = casadi.DM([1.2, 3.9, 2.]),
