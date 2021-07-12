@@ -297,7 +297,7 @@ class TestFilter(unittest.TestCase):
         cls.dofs, cls.ddofs, cls.dddofs = casadi.vertsplit(dofs_cas, [0, 8, 16, 24])
         cls.dofs_t, cls.dofs_r, _ = casadi.vertsplit(cls.dofs, [0, 3, 6, 8])
 
-        cls.p_C = casadi.SX.sym('p_C', 6)
+        cls.p_C = casadi.SX.sym('p_C', 3)
         cls.R_WC = casadi.SX.sym('p_C', 3, 3)
 
         cls.x = [cls.p_B, cls.v_B, cls.R_WB, cls.dofs_t, cls.dofs_r, cls.p_C, cls.R_WC]
@@ -356,7 +356,9 @@ class TestFilter(unittest.TestCase):
                 self.R_WB + self.R_WB @ casadi.skew(self.dt * self.om),
                 self.dofs_t,
                 self.dofs_r,
-                p_B_next + self.R_WB @ self.p_CB,
+                self.p_C + self.dt * self.v_B \
+                    + self.dt**2 / 2 * self.R_WB @ self.acc \
+                    + self.R_WB @ self.p_CB,
                 self.R_WC + self.R_WC @ casadi.skew(self.dt * om_C)],
             ['dt', *self.x_str, *self.u_str, *self.notch_dof_str],
             ['p_B_next', 'v_B_next', 'R_WB_next',
