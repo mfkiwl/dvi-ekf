@@ -503,6 +503,27 @@ class TestFilter(unittest.TestCase):
                          )
         err_p_B_next = res['err_p_B_next']
 
+    def test_covariance(self):
+        trmatr_err_p_C_dot = self._gen_trmatr_err_p_C_dot()
+        nmatr_err_p_C_dot = self._gen_nmatr_err_p_C_dot()
+
+        Fx = casadi.SX.eye(self.err_x_cas.shape[0])
+
+        Fx[0:3, 3:6] = self.dt * np.eye(3)
+        Fx[3:6, 6:9] = - self.R_WB @ casadi.skew(self.acc) * self.dt
+        Fx[6:9, 6:9] = casadi.skew(self.om * self.dt).T
+        Fx[9:15, :]  = 0 # dofs
+        Fx[15:18, :] = Fx[15:18, :] + self.dt * trmatr_err_p_C_dot
+
+        Fi = casadi.SX.zeros(self.err_x_cas.shape[0], self.n_cas.shape[0])
+        Fi[3:15, :] = casadi.SX.eye(12)
+        Fi[15:18, :] = nmatr_err_p_C_dot
+
+        P0 = casadi.SX.eye(self.err_x_cas.shape[0]) * 0.01
+        Q = casadi.SX.eye(self.n_cas.shape[0]) * 0.01
+
+        P = Fx @ P0 @ Fx.T  + Fi @ Q @ Fi.T
+
 def suite():
     suite = unittest.TestSuite()
     test_class = TestSimpleProbeBC
