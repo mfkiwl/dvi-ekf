@@ -1,6 +1,7 @@
 from . import context
 from Filter import ImuTraj
 
+import os
 import numpy as np
 import sympy as sp
 import casadi
@@ -90,6 +91,7 @@ class Imu(object):
         self._num_imu_between_frames = None
 
         self._flag_interpolated = False
+        self._flag_traj_from_file = False
 
     @property
     def om(self):
@@ -108,6 +110,10 @@ class Imu(object):
     def flag_interpolated(self):
         self._flag_interpolated = self.cam.flag_interpolated
         return self._flag_interpolated
+
+    @property
+    def flag_traj_from_file(self):
+        return self._flag_traj_from_file
 
     def __iter__(self):
         for attr, value in self.__dict__.items():
@@ -168,11 +174,32 @@ class Imu(object):
     def _correct_cam_dims(self, cam_arg):
         return cam_arg.reshape(3, 1) if cam_arg.shape != (3, 1) else cam_arg
 
-    def generate_traj(self, filepath, do_regenerate):
-        if do_regenerate:
-            self._generate_new_traj(filepath)
-        else:
-            self._read_from_file(filepath)
+    def generate_traj(self, filepath, do_regenerate=False):
+
+        def get_numlines():
+            try:
+                with open(filepath) as f:
+                    n = sum(1 for line in f)
+                return n
+            except FileNotFoundError:
+                return 0
+
+        if not do_regenerate:
+            # if file exists and matches dimensions
+            if os.path.isfile(filepath):
+                print(f'File \'{filepath}\' exists!\n')
+                n = get_numlines()
+                if n == self.cam.max_vals:
+                    self._read_from_file(filepath)
+                    return
+                else:
+                    ans = input(f'Data in \'{filepath}\' has {n} values, but this program run requires {self.cam.max_vals} total interpolated values ({self.cam.num_imu_between_frames} interframe vals).\nRegenerate? y/n')
+                    if ans.lower() == 'n':
+                        return
+            else:
+                print(f'File \'{filepath}\' does not exist!\n')
+
+        self._generate_new_traj(filepath)
 
     def _generate_new_traj(self, filepath):
         import time, os
@@ -287,6 +314,7 @@ class Imu(object):
     def _read_from_file(self, filepath):
         print(f"Reading IMU data from {filepath}...")
         self.traj = ImuTraj(filepath=filepath)
+        self._flag_traj_from_file = True
         self._update_from_trajectory()
 
     def _update_from_trajectory(self):

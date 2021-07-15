@@ -32,8 +32,12 @@ class Filter(object):
         self.R = np.diag(meas_noise)
 
         # buffer
-        self._om_old = imu.om.squeeze()
-        self._acc_old = imu.acc.squeeze()
+        if imu.flag_traj_from_file:
+            self._om_old = imu.om[:,0].squeeze()
+            self._acc_old = imu.acc[:,0].squeeze()
+        else:
+            self._om_old = imu.om.squeeze()
+            self._acc_old = imu.acc.squeeze()
         self.R_WB_old = self.states.q.rot
 
         # covariance

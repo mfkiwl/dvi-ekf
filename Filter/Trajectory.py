@@ -847,7 +847,7 @@ class ImuTraj(Trajectory):
             not (start_index == next_index):
             start_index = prev_index + 1
 
-        t = self.t[start_index:next_index+1]
+        t = np.array(self.t[start_index:next_index+1])
 
         ax = self.ax[start_index:next_index+1]
         ay = self.ay[start_index:next_index+1]
